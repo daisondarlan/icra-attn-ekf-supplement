@@ -17,20 +17,26 @@
     return m ? m[1] : null;
   }
 
-  function artifactDownloadUrl(path){
+  function anonymousFileViewUrl(path){
     const repoId = anonymousRepoId();
-    if (repoId) {
-      return "/api/repo/" + encodeURIComponent(repoId) + "/file/" +
-             path.split("/").map(encodeURIComponent).join("/") + "?download=true";
-    }
-    return path;
+    if (!repoId) return path;
+    return "/r/" + encodeURIComponent(repoId) + "/" +
+           path.split("/").map(encodeURIComponent).join("/");
+  }
+
+  function artifactDownloadUrl(path){
+    return anonymousRepoId() ? anonymousFileViewUrl(path) : path;
   }
 
   function downloadRepositoryFile(path, filename){
+    if (anonymousRepoId()) {
+      window.location.href = anonymousFileViewUrl(path);
+      return;
+    }
     const a = document.createElement("a");
-    a.href = artifactDownloadUrl(path);
+    a.href = path;
     a.target = "_self";
-    if (!anonymousRepoId()) a.download = filename || path.split("/").pop();
+    a.download = filename || path.split("/").pop();
     document.body.appendChild(a);
     a.click();
     a.remove();
