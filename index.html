@@ -11,14 +11,47 @@
     controllerLog: "data/telemetry_pid.csv"
   };
   
+  function anonymousRepoId(){
+    if (location.hostname !== "anonymous.4open.science") return null;
+    const m = location.pathname.match(/^\/w\/([^/]+)/);
+    return m ? m[1] : null;
+  }
+
+  function artifactDownloadUrl(path){
+    const repoId = anonymousRepoId();
+    if (repoId) {
+      return "/api/repo/" + encodeURIComponent(repoId) + "/file/" +
+             path.split("/").map(encodeURIComponent).join("/") + "?download=true";
+    }
+    return path;
+  }
+
+  function downloadRepositoryFile(path, filename){
+    const a = document.createElement("a");
+    a.href = artifactDownloadUrl(path);
+    a.target = "_self";
+    if (!anonymousRepoId()) a.download = filename || path.split("/").pop();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
   // Uses repository-local artifacts so the anonymous site does not depend on Google Drive.
   document.addEventListener("DOMContentLoaded", () => {
     const video = document.getElementById("field-video");
     if (video) video.src = LOCAL_ARTIFACTS.videoFile;
     const est = document.getElementById("drive-est-log");
-    if (est) est.href = LOCAL_ARTIFACTS.estimatorLog;
+    if (est) {
+      est.href = artifactDownloadUrl(LOCAL_ARTIFACTS.estimatorLog);
+      est.target = "_self";
+      if (!anonymousRepoId()) est.setAttribute("download", "telemetry_est.csv");
+    }
     const pid = document.getElementById("drive-pid-log");
-    if (pid) pid.href = LOCAL_ARTIFACTS.controllerLog;
+    if (pid) {
+      pid.href = artifactDownloadUrl(LOCAL_ARTIFACTS.controllerLog);
+      pid.target = "_self";
+      if (!anonymousRepoId()) pid.setAttribute("download", "telemetry_pid.csv");
+    }
   });
 </script>
 <meta charset="UTF-8">
@@ -802,20 +835,13 @@ window.__SRC_DASHBOARD__ = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta c
 /* ============================================================================
      LIVE SIMULATOR — Embedded Dashboard Iframe
   ============================================================================ */
-  function triggerDownload(filename, content, mime){
-    try{
-      var blob = new Blob([content], { type: mime || "text/plain" });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement("a");
-      a.href = url; a.download = filename;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
-    }catch(e){ console.error("download failed", e); }
-  }
-
   window.uavSim = {
-    downloadBackend: function(){ triggerDownload("uav_sim_backend.py", window.__SRC_BACKEND__ || "", "text/x-python"); },
-    downloadDashboard: function(){ triggerDownload("uav_sim_dashboard.html", window.__SRC_DASHBOARD__ || "", "text/html"); }
+    downloadBackend: function(){
+      downloadRepositoryFile("code/uav_sim_backend.py", "uav_sim_backend.py");
+    },
+    downloadDashboard: function(){
+      downloadRepositoryFile("code/uav_sim_dashboard.html", "uav_sim_dashboard.html");
+    }
   };
 
   function initIframe(){
@@ -824,10 +850,9 @@ window.__SRC_DASHBOARD__ = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta c
       iframe.srcdoc = window.__SRC_DASHBOARD__;
     }
     var newTabBtn = document.getElementById("btn-open-dashboard");
-    if(newTabBtn && window.__SRC_DASHBOARD__) {
+    if(newTabBtn) {
       newTabBtn.onclick = function() {
-        var blob = new Blob([window.__SRC_DASHBOARD__], { type: "text/html" });
-        window.open(URL.createObjectURL(blob), "_blank");
+        window.open("code/uav_sim_dashboard.html", "_blank", "noopener");
       };
     }
   }
