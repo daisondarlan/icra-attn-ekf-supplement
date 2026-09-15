@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UAV Matrix — Dual-Arena Flight Test Range</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+  :root{
+    --bg-sky:#EAF1F6;
+    --surface:#FFFFFF;
+    --surface-alt:#F2F5F8;
+    --ink:#16232E;
+    --ink-soft:#56697A;
+    --ink-faint:#8A99A6;
+    --line:#D6DEE5;
+    --accent:#0E7C9D;
+    --accent-dim:#DCEEF3;
+    --warn:#C1590F;
+    --warn-dim:#FBE7D8;
+    --nominal:#23805A;
+    --nominal-dim:#DFF0E7;
+    --radius-panel:10px;
+    --radius-chip:6px;
+    font-size:16px;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:var(--surface-alt);
+    color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif;
+    display:flex;
+    flex-direction:column;
+    min-height:100vh;
+  }
+  .mono{ font-family:'IBM Plex Mono', ui-monospace, monospace; }
+  .display{ font-family:'Space Grotesk', 'Inter', sans-serif; }
+
+  /* ---------------- Top bar ---------------- */
+  header.topbar{
+    display:flex;
+    align-items:center;
+    gap:28px;
+    padding:14px 24px;
+    background:var(--surface);
+    border-bottom:1px solid var(--line);
+    flex-wrap:wrap;
+  }
+  .wordmark{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700;
+    font-size:1.15rem;
+    letter-spacing:0.01em;
+    color:var(--ink);
+    white-space:nowrap;
+  }
+  .wordmark span{ color:var(--accent); }
+
+  nav.tabs{ display:flex; gap:4px; background:var(--surface-alt); padding:4px; border-radius:9px; }
+  nav.tabs button{
+    border:none; background:transparent; padding:8px 16px; border-radius:6px;
+    font-family:'Space Grotesk', sans-serif; font-weight:600; font-size:0.88rem;
+    color:var(--ink-soft); cursor:pointer; transition:background .15s, color .15s;
+  }
+  nav.tabs button.active{ background:var(--surface); color:var(--ink); box-shadow:0 1px 2px rgba(22,35,46,0.08); }
+  nav.tabs button:disabled{ color:var(--ink-faint); cursor:not-allowed; }
+  nav.tabs button:not(:disabled):hover{ color:var(--ink); }
+
+  .status-pill{
+    margin-left:auto; display:flex; align-items:center; gap:8px;
+    padding:6px 12px; border-radius:20px; background:var(--surface-alt);
+    font-size:0.82rem; color:var(--ink-soft); white-space:nowrap;
+  }
+  .status-dot{ width:8px; height:8px; border-radius:50%; background:var(--ink-faint); flex:none; }
+  .status-dot.connecting{ background:#C9A227; animation:pulse 1.1s infinite; }
+  .status-dot.running{ background:var(--nominal); animation:pulse 1.6s infinite; }
+  .status-dot.stopped{ background:var(--ink-faint); }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+
+  /* ---------------- Layout ---------------- */
+  main{ flex:1; display:flex; min-height:0; }
+  .panel{ display:none; flex:1; min-height:0; }
+  .panel.active{ display:flex; }
+
+  /* ---- Setup panel ---- */
+  #panel-setup.active{ align-items:center; justify-content:center; }
+  .setup-card{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-panel);
+    padding:36px 40px; width:min(440px, 90vw); box-shadow:0 1px 3px rgba(22,35,46,0.06);
+  }
+  .setup-card h1{ font-family:'Space Grotesk',sans-serif; font-size:1.4rem; margin:0 0 6px; }
+  .setup-card p.lead{ color:var(--ink-soft); font-size:0.92rem; line-height:1.5; margin:0 0 24px; }
+  .field-label{ display:block; font-size:0.8rem; color:var(--ink-soft); margin-bottom:6px; }
+  .field-row{ display:flex; gap:10px; margin-bottom:14px; }
+  #session-input{
+    flex:1; padding:10px 12px; border:1px solid var(--line); border-radius:7px;
+    font-family:'IBM Plex Mono', monospace; font-size:0.95rem; color:var(--ink); background:var(--surface-alt);
+  }
+  #session-input:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  button.primary{
+    background:var(--accent); color:#fff; border:none; border-radius:7px; padding:10px 20px;
+    font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:0.92rem; cursor:pointer;
+    transition:background .15s;
+  }
+  button.primary:hover{ background:#0B6883; }
+  button.primary:disabled{ background:var(--ink-faint); cursor:not-allowed; }
+  .setup-status{ margin-top:18px; font-size:0.85rem; color:var(--ink-soft); min-height:1.4em; }
+  .setup-note{ margin-top:22px; padding-top:18px; border-top:1px solid var(--line); font-size:0.78rem; color:var(--ink-faint); line-height:1.5; }
+
+  /* ---- Arena panels ---- */
+  .arena{ flex:1; display:flex; flex-direction:column; min-width:0; }
+  .arena-body{ flex:1; display:flex; min-height:0; }
+  .canvas-wrap{ flex:1; position:relative; background:linear-gradient(180deg, #DDEAF3 0%, #EAF1F6 55%, #EFF3F2 100%); }
+  .canvas-wrap canvas{ display:block; width:100%; height:100%; }
+  .lane-labels{ position:absolute; left:0; right:0; bottom:6px; display:flex; pointer-events:none; }
+  .lane-labels span{ flex:1; text-align:center; font-size:0.68rem; color:var(--ink-soft); font-family:'IBM Plex Mono',monospace; }
+
+  .rail{
+    width:250px; flex:none; background:var(--surface); border-left:1px solid var(--line);
+    overflow-y:auto; padding:10px;
+  }
+  .rail h2{ font-family:'Space Grotesk',sans-serif; font-size:0.82rem; color:var(--ink-soft); margin:6px 8px 10px; font-weight:600; }
+  .rail-row{
+    display:flex; justify-content:space-between; align-items:baseline; gap:8px;
+    padding:8px 8px; border-radius:6px; margin-bottom:2px; font-size:0.78rem;
+  }
+  .rail-row.highlight{ background:var(--accent-dim); }
+  .rail-row .name{ color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rail-row .val{ font-family:'IBM Plex Mono',monospace; color:var(--ink); white-space:nowrap; }
+
+  .bottom-bar{
+    display:flex; align-items:center; gap:10px; padding:10px 16px; background:var(--surface);
+    border-top:1px solid var(--line); flex-wrap:wrap;
+  }
+  .chip{
+    display:flex; align-items:center; gap:6px; padding:5px 11px; border-radius:20px;
+    background:var(--surface-alt); font-size:0.74rem; color:var(--ink-soft); font-family:'IBM Plex Mono',monospace;
+  }
+  .chip.warn{ background:var(--warn-dim); color:var(--warn); }
+  .chip .chip-label{ font-family:'Inter',sans-serif; color:var(--ink-faint); }
+
+  .kill-switch-btn{
+    margin-left:auto; background:var(--surface); border:1.5px solid var(--warn); color:var(--warn);
+    border-radius:7px; padding:9px 18px; font-family:'Space Grotesk',sans-serif; font-weight:600;
+    font-size:0.86rem; cursor:pointer; transition:background .15s, color .15s;
+  }
+  .kill-switch-btn:hover{ background:var(--warn-dim); }
+  .kill-switch-btn.armed{ background:var(--warn); color:#fff; }
+  .kill-switch-btn:disabled{ opacity:0.5; cursor:not-allowed; }
+
+  ::-webkit-scrollbar{ width:8px; }
+  ::-webkit-scrollbar-thumb{ background:var(--line); border-radius:4px; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wordmark">UAV <span>MATRIX</span></div>
+  <nav class="tabs">
+    <button id="tab-btn-setup" class="active" onclick="showPanel('setup')">Setup</button>
+    <button id="tab-btn-control" disabled onclick="showPanel('control')">Control Arena</button>
+    <button id="tab-btn-estimation" disabled onclick="showPanel('estimation')">Estimation Arena</button>
+  </nav>
+  <div class="status-pill">
+    <span class="status-dot" id="status-dot"></span>
+    <span id="status-text">not connected</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ============== SETUP PANEL ============== -->
+  <section class="panel active" id="panel-setup">
+    <div class="setup-card">
+      <h1>Connect to the simulation backend</h1>
+      <p class="lead">Enter a session ID (or keep the generated one), then connect. The Colab
+        backend picks up this session automatically once you connect — no need to paste
+        anything back into Colab.</p>
+      <span class="field-label">Session ID</span>
+      <div class="field-row">
+        <input id="session-input" class="mono" type="text" spellcheck="false">
+        <button class="primary" id="connect-btn" onclick="connectSession()">Connect</button>
+      </div>
+      <div class="setup-status" id="setup-status">Not connected yet.</div>
+      <div class="setup-note">Runs over the public broker.hivemq.com test broker. Session IDs
+        scope the MQTT topics, so keep this ID reasonably unique if others might be testing
+        at the same time.</div>
+    </div>
+  </section>
+
+  <!-- ============== CONTROL ARENA PANEL ============== -->
+  <section class="panel" id="panel-control">
+    <div class="arena">
+      <div class="arena-body">
+        <div class="canvas-wrap">
+          <canvas id="canvas-control"></canvas>
+        </div>
+        <aside class="rail">
+          <h2>Control arena — 11 controllers, shared EKF</h2>
+          <div id="rail-control"></div>
+        </aside>
+      </div>
+      <div class="bottom-bar" id="bottom-bar-control"></div>
+    </div>
+  </section>
+
+  <!-- ============== ESTIMATION ARENA PANEL ============== -->
+  <section class="panel" id="panel-estimation">
+    <div class="arena">
+      <div class="arena-body">
+        <div class="canvas-wrap">
+          <canvas id="canvas-estimation"></canvas>
+        </div>
+        <aside class="rail">
+          <h2>Estimation arena — 5 estimators, shared PID</h2>
+          <div id="rail-estimation"></div>
+        </aside>
+      </div>
+      <div class="bottom-bar" id="bottom-bar-estimation"></div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+/* ============================================================================
+   UAV MATRIX DASHBOARD — client logic
+   Pure 2D canvas rendering only. No charting library is used anywhere here;
+   the Python backend owns all quantitative telemetry logging.
+============================================================================ */
+
+const TOPIC_PREFIX = "uavsim";
+const VIEW_ALT_MAX = 18; // meters, top of the visible flight envelope
+
+function randomSessionId(){
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "UAV-";
+  for(let i=0;i<6;i++) s += chars[Math.floor(Math.random()*chars.length)];
+  return s;
+}
+document.getElementById("session-input").value = randomSessionId();
+
+const state = {
+  client: null,
+  sessionId: null,
+  connected: false,
+  running: false,
+  killArmed: false,
+  lastControl: null,
+  lastEstimation: null,
+  activeTab: "setup",
+  windStreaks: [],
+};
+
+// -------------------- Tab handling --------------------
+function showPanel(name){
+  state.activeTab = name;
+  ["setup","control","estimation"].forEach(n=>{
+    document.getElementById("panel-"+n).classList.toggle("active", n===name);
+    const btn = document.getElementById("tab-btn-"+n);
+    if(btn) btn.classList.toggle("active", n===name);
+  });
+}
+
+// -------------------- Status pill --------------------
+function setStatus(kind, text){
+  const dot = document.getElementById("status-dot");
+  dot.className = "status-dot " + kind;
+  document.getElementById("status-text").textContent = text;
+}
+
+// -------------------- MQTT connection --------------------
+function connectSession(){
+  const input = document.getElementById("session-input");
+  const sessionId = input.value.trim();
+  if(!sessionId){ return; }
+  state.sessionId = sessionId;
+  input.disabled = true;
+  document.getElementById("connect-btn").disabled = true;
+  document.getElementById("setup-status").textContent = "Connecting to broker.hivemq.com ...";
+  setStatus("connecting", "connecting…");
+
+  const clientId = "dash-" + Math.random().toString(16).slice(2, 10);
+  const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt", { clientId, clean:true });
+  state.client = client;
+
+  client.on("connect", () => {
+    state.connected = true;
+    setStatus("connecting", "waiting for backend…");
+    document.getElementById("setup-status").textContent =
+      "Connected to broker. Waiting for the Colab backend to pick up session '" + sessionId + "'...";
+    client.subscribe(TOPIC_PREFIX + "/" + sessionId + "/status");
+    client.subscribe(TOPIC_PREFIX + "/" + sessionId + "/telemetry/pid");
+    client.subscribe(TOPIC_PREFIX + "/" + sessionId + "/telemetry/est");
+    client.publish(TOPIC_PREFIX + "/" + sessionId + "/hello", JSON.stringify({ts: Date.now()}), {retain:true});
+  });
+
+  client.on("reconnect", () => setStatus("connecting", "reconnecting…"));
+  client.on("close", () => { if(!state.running) setStatus("stopped", "disconnected"); });
+  client.on("error", (err) => {
+    document.getElementById("setup-status").textContent = "Connection error: " + err.message;
+  });
+
+  client.on("message", (topic, payload) => {
+    let data;
+    try{ data = JSON.parse(payload.toString()); } catch(e){ return; }
+    const parts = topic.split("/");
+    const kind = parts[2];
+
+    if(kind === "status"){
+      if(data.status === "running"){
+        state.running = true;
+        setStatus("running", "session '" + sessionId + "' running");
+        document.getElementById("setup-status").textContent = "Backend is running. Switch to an arena tab to watch it fly.";
+        document.getElementById("tab-btn-control").disabled = false;
+        document.getElementById("tab-btn-estimation").disabled = false;
+      } else if(data.status === "terminated"){
+        state.running = false;
+        setStatus("stopped", "terminated — logs exported on backend");
+      }
+    } else if(kind === "telemetry"){
+      const arenaKind = parts[3];
+      if(arenaKind === "pid"){
+        state.lastControl = data;
+        if(!state.running){
+          state.running = true;
+          setStatus("running", "session '" + sessionId + "' running");
+          document.getElementById("tab-btn-control").disabled = false;
+          document.getElementById("tab-btn-estimation").disabled = false;
+          if(state.activeTab === "setup") showPanel("control");
+        }
+        renderRail("control", data);
+        renderChips("control", data);
+      } else if(arenaKind === "est"){
+        state.lastEstimation = data;
+        renderRail("estimation", data);
+        renderChips("estimation", data);
+      }
+    }
+  });
+}
+
+// -------------------- Kill switch --------------------
+function buildKillSwitch(containerId){
+  const btn = document.createElement("button");
+  btn.className = "kill-switch-btn";
+  btn.textContent = "Terminate & Export Logs";
+  btn.onclick = () => onKillSwitch(btn);
+  document.getElementById(containerId).appendChild(btn);
+}
+function onKillSwitch(btn){
+  if(!state.killArmed){
+    state.killArmed = true;
+    btn.classList.add("armed");
+    btn.textContent = "Confirm terminate?";
+    setTimeout(() => {
+      if(state.killArmed && btn.textContent === "Confirm terminate?"){
+        state.killArmed = false;
+        btn.classList.remove("armed");
+        btn.textContent = "Terminate & Export Logs";
+      }
+    }, 4000);
+    return;
+  }
+  state.killArmed = false;
+  if(state.client && state.sessionId){
+    state.client.publish(TOPIC_PREFIX + "/" + state.sessionId + "/cmd", JSON.stringify({cmd:"terminate"}));
+  }
+  document.querySelectorAll(".kill-switch-btn").forEach(b=>{
+    b.disabled = true;
+    b.textContent = "Terminating — exporting logs…";
+  });
+  setStatus("stopped", "terminating…");
+}
+buildKillSwitch("bottom-bar-control");
+buildKillSwitch("bottom-bar-estimation");
+
+// -------------------- Telemetry rail --------------------
+function renderRail(arenaKind, data){
+  const railEl = document.getElementById("rail-" + arenaKind);
+  railEl.innerHTML = "";
+  const isControl = arenaKind === "control";
+  data.drones.forEach(d => {
+    const row = document.createElement("div");
+    row.className = "rail-row" + ((isControl && d.id === 11) || (!isControl && d.id === 5) ? " highlight" : "");
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = "D" + d.id + " " + d.name;
+    const val = document.createElement("span");
+    val.className = "val";
+    if(isControl){
+      val.textContent = d.z.toFixed(2) + " m";
+    } else {
+      val.textContent = d.z_est.toFixed(2) + " m est";
+    }
+    row.appendChild(name);
+    row.appendChild(val);
+    railEl.appendChild(row);
+  });
+  if(isControl && data.confidence_C !== undefined){
+    const row = document.createElement("div");
+    row.className = "rail-row highlight";
+    row.innerHTML = '<span class="name">D11 confidence C</span><span class="val">' + data.confidence_C.toFixed(3) + "</span>";
+    railEl.appendChild(row);
+  }
+}
+
+// -------------------- Environment / obstacle chips --------------------
+function renderChips(arenaKind, data){
+  const bar = document.getElementById("bottom-bar-" + arenaKind);
+  const killBtn = bar.querySelector(".kill-switch-btn"); // stays pinned to the right (margin-left:auto)
+  Array.from(bar.querySelectorAll(".chip")).forEach(c => c.remove());
+
+  const addChip = (label, val, warn) => {
+    const c = document.createElement("div");
+    c.className = "chip" + (warn ? " warn" : "");
+    c.innerHTML = label ? ('<span class="chip-label">' + label + "</span>" + val) : val;
+    bar.insertBefore(c, killBtn);
+  };
+
+  addChip("Target", data.target.toFixed(1) + " m");
+  addChip("Wind", data.env.wind.toFixed(2) + " m/s²");
+  addChip("Fog", Math.round(data.env.fog*100) + "%");
+  addChip("Lidar scatter", Math.round(data.env.lidar_scatter*100) + "%");
+  addChip("Baro shift", data.env.baro_shift.toFixed(2) + " m");
+  if(data.obstacle.ceiling !== null && data.obstacle.ceiling !== undefined){
+    addChip("Ceiling", data.obstacle.ceiling.toFixed(1) + " m", true);
+  }
+  if(data.obstacle.microburst){ addChip(null, "MICROBURST", true); }
+  if(data.obstacle.lidar_fault){ addChip(null, "LIDAR FAULT", true); }
+}
+
+// -------------------- Canvas rendering --------------------
+function setupCanvas(canvas){
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.round(rect.width * dpr));
+  canvas.height = Math.max(1, Math.round(rect.height * dpr));
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w: rect.width, h: rect.height };
+}
+
+function altToY(z, h, topY, groundY){
+  const clamped = Math.max(0, Math.min(VIEW_ALT_MAX, z));
+  return groundY - (clamped / VIEW_ALT_MAX) * (groundY - topY);
+}
+
+function drawArena(canvas, data, isEstimation){
+  if(!data) return;
+  const { ctx, w, h } = setupCanvas(canvas);
+  const topY = 18, groundY = h - 26;
+  const n = data.drones.length;
+  const laneW = w / n;
+  const time = performance.now() / 1000;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // ---- ground reference grid ----
+  ctx.strokeStyle = "rgba(22,35,46,0.08)";
+  ctx.lineWidth = 1;
+  ctx.font = "10px 'IBM Plex Mono', monospace";
+  ctx.fillStyle = "rgba(22,35,46,0.35)";
+  for(let m = 0; m <= VIEW_ALT_MAX; m += 3){
+    const y = altToY(m, h, topY, groundY);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+    ctx.fillText(m + "m", 4, y - 3);
+  }
+
+  // ---- fog overlay ----
+  const fog = data.env.fog || 0;
+  if(fog > 0.02){
+    ctx.fillStyle = "rgba(255,255,255," + (fog * 0.55).toFixed(3) + ")";
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // ---- wind streaks ----
+  const wind = data.env.wind || 0;
+  const nStreaks = 14;
+  ctx.strokeStyle = "rgba(14,124,157,0.28)";
+  ctx.lineWidth = 1.5;
+  for(let i=0;i<nStreaks;i++){
+    const speed = wind * 26;
+    const baseX = (i / nStreaks) * (w + 120) - 60;
+    const x = ((baseX + time * speed) % (w + 120) + (w + 120)) % (w + 120) - 60;
+    const y = topY + 14 + (i * 37) % (groundY - topY - 20);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + 22 * Math.sign(speed || 1), y - 6 * Math.sign(speed||1));
+    ctx.stroke();
+  }
+
+  // ---- obstacle: moving ceiling ----
+  if(data.obstacle.ceiling !== null && data.obstacle.ceiling !== undefined){
+    const ceilY = altToY(data.obstacle.ceiling, h, topY, groundY);
+    ctx.fillStyle = "rgba(193,89,15,0.16)";
+    ctx.fillRect(0, topY, w, ceilY - topY);
+    ctx.strokeStyle = "rgba(193,89,15,0.65)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, ceilY);
+    ctx.lineTo(w, ceilY);
+    ctx.stroke();
+  }
+
+  // ---- obstacle: microburst gust chevrons ----
+  if(data.obstacle.microburst){
+    ctx.strokeStyle = "rgba(193,89,15,0.55)";
+    ctx.lineWidth = 2;
+    for(let i=0;i<6;i++){
+      const cx = ((i+0.5)/6) * w;
+      const cy = ((time*220 + i*47) % (groundY-topY)) + topY;
+      ctx.beginPath();
+      ctx.moveTo(cx-8, cy-8);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx+8, cy-8);
+      ctx.stroke();
+    }
+  }
+
+  // ---- obstacle: lidar fault glitch ----
+  if(data.obstacle.lidar_fault){
+    ctx.fillStyle = "rgba(193,89,15," + (0.06 + 0.04*Math.sin(time*20)) + ")";
+    ctx.fillRect(0, topY, w, groundY - topY);
+  }
+
+  // ---- target altitude line ----
+  const targetY = altToY(data.target, h, topY, groundY);
+  ctx.save();
+  ctx.setLineDash([6,5]);
+  ctx.strokeStyle = "rgba(35,128,90,0.7)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, targetY);
+  ctx.lineTo(w, targetY);
+  ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = "rgba(35,128,90,0.9)";
+  ctx.font = "10px 'IBM Plex Mono', monospace";
+  ctx.fillText("target " + data.target.toFixed(1) + "m", w - 82, targetY - 4);
+
+  // ---- ground line ----
+  ctx.strokeStyle = "rgba(22,35,46,0.25)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, groundY);
+  ctx.lineTo(w, groundY);
+  ctx.stroke();
+
+  // ---- drones ----
+  data.drones.forEach((d, i) => {
+    const cx = laneW * (i + 0.5);
+    const zTrue = d.z;
+    const yTrue = altToY(zTrue, h, topY, groundY);
+    const isSpecial = isEstimation ? d.id === 5 : d.id === 11;
+
+    if(isEstimation && typeof d.z_est === "number"){
+      const yEst = altToY(d.z_est, h, topY, groundY);
+      const band = d.P11 ? Math.sqrt(Math.max(d.P11,0)) * (groundY-topY)/VIEW_ALT_MAX : 3;
+      ctx.fillStyle = "rgba(14,124,157,0.14)";
+      ctx.fillRect(cx - laneW*0.32, yEst - band, laneW*0.64, band*2);
+      ctx.strokeStyle = "rgba(14,124,157,0.75)";
+      ctx.setLineDash([3,3]);
+      ctx.beginPath();
+      ctx.moveTo(cx - laneW*0.36, yEst);
+      ctx.lineTo(cx + laneW*0.36, yEst);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // thrust plume (downwash), height scaled loosely by distance from hover thrust
+    const plumeH = Math.min(34, Math.max(4, Math.abs((d.u || 14.7) - 14.7) * 2.2 + 8));
+    const grad = ctx.createLinearGradient(cx, yTrue+8, cx, yTrue+8+plumeH);
+    grad.addColorStop(0, isSpecial ? "rgba(14,124,157,0.55)" : "rgba(86,105,122,0.35)");
+    grad.addColorStop(1, "rgba(86,105,122,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(cx-7, yTrue+8);
+    ctx.lineTo(cx+7, yTrue+8);
+    ctx.lineTo(cx+3, yTrue+8+plumeH);
+    ctx.lineTo(cx-3, yTrue+8+plumeH);
+    ctx.closePath();
+    ctx.fill();
+
+    // rotor blur (pulsing)
+    const blurAlpha = 0.25 + 0.15*Math.sin(time*18 + i);
+    ctx.strokeStyle = isSpecial ? "rgba(14,124,157,0.9)" : "rgba(22,35,46,0.55)";
+    ctx.fillStyle = "rgba(120,140,155," + blurAlpha.toFixed(2) + ")";
+    [[-11,-3],[11,-3],[-11,3],[11,3]].forEach(([dx,dy])=>{
+      ctx.beginPath();
+      ctx.ellipse(cx+dx, yTrue+dy, 6, 2, 0, 0, Math.PI*2);
+      ctx.fill();
+    });
+
+    // body
+    ctx.fillStyle = isSpecial ? "#0E7C9D" : "#2C3B47";
+    roundRect(ctx, cx-9, yTrue-5, 18, 10, 3);
+    ctx.fill();
+
+    // label
+    ctx.fillStyle = "rgba(22,35,46,0.6)";
+    ctx.font = "9px 'IBM Plex Mono', monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("D" + d.id, cx, groundY + 14);
+    ctx.textAlign = "left";
+  });
+}
+
+function roundRect(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+}
+
+function renderLoop(){
+  if(state.activeTab === "control" && state.lastControl){
+    drawArena(document.getElementById("canvas-control"), state.lastControl, false);
+  } else if(state.activeTab === "estimation" && state.lastEstimation){
+    drawArena(document.getElementById("canvas-estimation"), state.lastEstimation, true);
+  }
+  requestAnimationFrame(renderLoop);
+}
+requestAnimationFrame(renderLoop);
+
+window.addEventListener("resize", () => {
+  if(state.lastControl) drawArena(document.getElementById("canvas-control"), state.lastControl, false);
+  if(state.lastEstimation) drawArena(document.getElementById("canvas-estimation"), state.lastEstimation, true);
+});
+</script>
+</body>
+</html>

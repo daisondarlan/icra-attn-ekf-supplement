@@ -1,0 +1,6 @@
+Anonymous supplementary-material repository.
+
+Website entry point: index.html
+Extracted source: code/uav_sim_backend.py and code/uav_sim_dashboard.html
+Before public/anonymous release, add data/telemetry_est.csv, data/telemetry_pid.csv, and media/field_test.mp4.
+Do not add author names, affiliations, emails, personal GitHub usernames, or identifying metadata before review.
